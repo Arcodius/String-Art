@@ -2,6 +2,8 @@ import cv2
 import numpy as np
 import sys
 import math
+import itertools
+import random
 
 from bresenham import *
 from scipy.sparse.linalg import lsqr
@@ -24,11 +26,27 @@ def build_image_vector(image, size):
     sparse_b = csr_matrix((data, (row_ind, col_ind)), shape=(size * size, 1))
     return sparse_b
 
-def square_points(size):
-    return np.array([[0, y] for y in range(size)] + 
-                    [[size-1, y] for y in range(size)] + 
-                    [[x, 0] for x in range(1, size-1)] + 
-                    [[x, size-1] for x in range(1, size-1)])
+def square_points(image_size, num):
+    # expected number of partitions on each edge and image size
+    delta = image_size / num # float value
+    a, b, c, d = [], [], [], []
+    
+    for x in itertools.count(start=0, step=delta):
+        if x >= image_size:
+            break
+        a.append((0, round(x)))
+        b.append((image_size-1, round(x)))
+        c.append((round(x), 0))
+        d.append((round(x), image_size-1))
+        # a.append([0, round(x)])
+        # b.append([image_size-1, round(x)])
+        # c.append([round(x), 0])
+        # d.append([round(x), image_size-1])
+        
+    return a+b+c+d
+
+def diffEdge(start_point, end_point):
+    return (start_point[0] - end_point[0]) and (start_point[1] - end_point[1])
 
 def build_adjacency_matrix(size):
     edge_points = square_points(size)
@@ -110,6 +128,71 @@ def main():
     print(f"saving quantized jpg")
     rebuild_and_save(x, sparse, SIZE, "quantized.jpg")
 
+def compare(pixels, cur_image, target_image):
+    value = 0
+    diff = 0
+    for coords in pixels:
+        diff += target_image[coords[0], coords[1]] - cur_image[coords[0], coords[1]]
+
+    return diff
+
+def draw_line(coords, image):
+    value = 0
+    for coord in coords:
+        image[coord[0], coord[1]] = value
+    return image
+
+def greedyMethod():
+    SIZE = 128
+    hooks = square_points(SIZE, 8)
+
+    #存储点对之间的哈希表
+    line_hash_table = {}
+    for start in hooks:
+        for end in hooks:
+            line_hash_table[(start, end)] = False
+
+    target_image = cv2.imread("woman.jpg")
+    target_image = cv2.resize(target_image, (SIZE, SIZE), cv2.INTER_LANCZOS4)
+    target_image = cv2.cvtColor(target_image, cv2.COLOR_BGR2GRAY)
+    image = np.ones((SIZE, SIZE), dtype=np.uint8) * 255
+    
+    #从任意一点出发，进行(n-1)次连线，记录最接近的值
+
+    last_min_diff = MAX_VALUE
+    min_diff = MAX_VALUE
+    min_pair = []
+    begin = random.choice(hooks)
+    
+    for end in hooks:
+        if diffEdge(begin, end):
+            hook_pair = (begin, end)
+            if hook_pair in line_hash_table:
+                if line_hash_table[hook_pair] == False:
+                    line_hash_table[hook_pair] = True
+                    hook_pair_inv = (end, begin)
+                    line_hash_table[hook_pair_inv] = True
+
+                    # need to add grayvalue information
+                    pixel_coods = bresenham(begin, end).path
+
+                    cur_image = np.copy(image)
+                    cur_image = draw_line(pixel_coods, cur_image)
+                    cv2.imshow("Approximated Image", cur_image)
+                    cv2.waitKey(0)
+                    cv2.destroyAllWindows()
+
+                    diff = compare(pixel_coods, cur_image, target_image)
+                    print(diff)
+                    if diff < min_diff:
+                        min_diff = diff
+                        min_pair.clear()
+                        min_pair.append(hook_pair)
+                    # compare
+                    begin = end
+
+            else: 
+                print(f"key {hook_pair} not found")
 
 if __name__ == "__main__":
-    main()
+    greedyMethod()
